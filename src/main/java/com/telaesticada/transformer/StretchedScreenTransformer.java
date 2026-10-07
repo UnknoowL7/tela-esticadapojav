@@ -1,5 +1,6 @@
 package com.telaesticada.transformer;
 
+import net.minecraft.client.renderer.Project;
 import net.minecraft.launchwrapper.IClassTransformer;
 
 import org.objectweb.asm.ClassReader;
@@ -13,10 +14,39 @@ public class StretchedScreenTransformer implements IClassTransformer {
     private static final String ENTITY_RENDERER =
             "net/minecraft/client/renderer/EntityRenderer";
 
-    private static final String MINECRAFT =
-            "net/minecraft/client/Minecraft";
+    private static final String PROJECT =
+            "net/minecraft/client/renderer/Project";
 
+    private static final String TRANSFORMER =
+            "com/telaesticada/transformer/StretchedScreenTransformer";
+
+    /*
+     * Aspecto desejado.
+     *
+     * 4:3 = stretched forte em telas largas.
+     */
     private static final float STRETCHED_ASPECT = 4.0F / 3.0F;
+
+    /*
+     * Este método recebe exatamente os mesmos 4 valores
+     * que Project.gluPerspective recebe.
+     *
+     * Nós simplesmente ignoramos o aspect original
+     * e usamos 4:3.
+     */
+    public static void stretchedPerspective(
+            float fov,
+            float originalAspect,
+            float near,
+            float far) {
+
+        Project.gluPerspective(
+                fov,
+                STRETCHED_ASPECT,
+                near,
+                far
+        );
+    }
 
     @Override
     public byte[] transform(
@@ -28,241 +58,100 @@ public class StretchedScreenTransformer implements IClassTransformer {
             return null;
         }
 
+        /*
+         * Só mexemos no EntityRenderer.
+         */
         if (!ENTITY_RENDERER.equals(transformedName)) {
             return basicClass;
         }
 
         try {
 
-            ClassReader reader = new ClassReader(basicClass);
+            ClassReader reader =
+                    new ClassReader(basicClass);
 
-            ClassWriter writer = new ClassWriter(
-                    reader,
-                    ClassWriter.COMPUTE_MAXS
-            );
-
-            ClassVisitor visitor = new ClassVisitor(
-                    Opcodes.ASM4,
-                    writer
-            ) {
-
-                @Override
-                public MethodVisitor visitMethod(
-                        int access,
-                        String methodName,
-                        String descriptor,
-                        String signature,
-                        String[] exceptions) {
-
-                    MethodVisitor parent = super.visitMethod(
-                            access,
-                            methodName,
-                            descriptor,
-                            signature,
-                            exceptions
+            ClassWriter writer =
+                    new ClassWriter(
+                            reader,
+                            ClassWriter.COMPUTE_MAXS
                     );
 
-                    return new MethodVisitor(
+            ClassVisitor visitor =
+                    new ClassVisitor(
                             Opcodes.ASM4,
-                            parent
+                            writer
                     ) {
 
-                        private int state = 0;
-
                         @Override
-                        public void visitFieldInsn(
-                                int opcode,
-                                String owner,
-                                String fieldName,
-                                String fieldDescriptor) {
+                        public MethodVisitor visitMethod(
+                                int access,
+                                String methodName,
+                                String descriptor,
+                                String signature,
+                                String[] exceptions) {
 
-                            if (opcode == Opcodes.GETFIELD
-                                    && MINECRAFT.equals(owner)) {
-
-                                if ("displayWidth".equals(fieldName)
-                                        || "field_71443_c".equals(fieldName)) {
-
-                                    state = 1;
-
-                                    super.visitFieldInsn(
-                                            opcode,
-                                            owner,
-                                            fieldName,
-                                            fieldDescriptor
+                            MethodVisitor mv =
+                                    super.visitMethod(
+                                            access,
+                                            methodName,
+                                            descriptor,
+                                            signature,
+                                            exceptions
                                     );
 
-                                    return;
-                                }
+                            return new MethodVisitor(
+                                    Opcodes.ASM4,
+                                    mv
+                            ) {
 
-                                if (("displayHeight".equals(fieldName)
-                                        || "field_71440_d".equals(fieldName))
-                                        && state == 2) {
+                                @Override
+                                public void visitMethodInsn(
+                                        int opcode,
+                                        String owner,
+                                        String name,
+                                        String desc) {
 
-                                    state = 3;
+                                    /*
+                                     * Procura:
+                                     *
+                                     * Project.gluPerspective(
+                                     *     float,
+                                     *     float,
+                                     *     float,
+                                     *     float
+                                     * )
+                                     */
+                                    if (opcode == Opcodes.INVOKESTATIC
+                                            && PROJECT.equals(owner)
+                                            && "gluPerspective".equals(name)
+                                            && "(FFFF)V".equals(desc)) {
 
-                                    super.visitFieldInsn(
+                                        /*
+                                         * Mantemos exatamente os mesmos
+                                         * 4 valores na pilha.
+                                         *
+                                         * Apenas mudamos o destino da chamada.
+                                         */
+                                        super.visitMethodInsn(
+                                                Opcodes.INVOKESTATIC,
+                                                TRANSFORMER,
+                                                "stretchedPerspective",
+                                                "(FFFF)V"
+                                        );
+
+                                        return;
+                                    }
+
+                                    super.visitMethodInsn(
                                             opcode,
                                             owner,
-                                            fieldName,
-                                            fieldDescriptor
+                                            name,
+                                            desc
                                     );
-
-                                    return;
                                 }
-                            }
-
-                            state = 0;
-
-                            super.visitFieldInsn(
-                                    opcode,
-                                    owner,
-                                    fieldName,
-                                    fieldDescriptor
-                            );
-                        }
-
-                        @Override
-                        public void visitInsn(int opcode) {
-
-                            /*
-                             * displayWidth -> float
-                             */
-                            if (opcode == Opcodes.I2F
-                                    && state == 1) {
-
-                                state = 2;
-
-                                super.visitInsn(opcode);
-                                return;
-                            }
-
-                            /*
-                             * displayHeight -> float
-                             */
-                            if (opcode == Opcodes.I2F
-                                    && state == 3) {
-
-                                state = 4;
-
-                                super.visitInsn(opcode);
-                                return;
-                            }
-
-                            /*
-                             * width / height
-                             *
-                             * Substitui o resultado por 4:3.
-                             */
-                            if (opcode == Opcodes.FDIV
-                                    && state == 4) {
-
-                                /*
-                                 * Remove:
-                                 *
-                                 * width
-                                 * height
-                                 */
-                                super.visitInsn(Opcodes.POP);
-                                super.visitInsn(Opcodes.POP);
-
-                                /*
-                                 * Coloca:
-                                 *
-                                 * 4.0 / 3.0
-                                 */
-                                super.visitLdcInsn(
-                                        STRETCHED_ASPECT
-                                );
-
-                                state = 0;
-
-                                return;
-                            }
-
-                            state = 0;
-
-                            super.visitInsn(opcode);
-                        }
-
-                        @Override
-                        public void visitVarInsn(
-                                int opcode,
-                                int var) {
-
-                            state = 0;
-
-                            super.visitVarInsn(
-                                    opcode,
-                                    var
-                            );
-                        }
-
-                        @Override
-                        public void visitIntInsn(
-                                int opcode,
-                                int operand) {
-
-                            state = 0;
-
-                            super.visitIntInsn(
-                                    opcode,
-                                    operand
-                            );
-                        }
-
-                        @Override
-                        public void visitTypeInsn(
-                                int opcode,
-                                String type) {
-
-                            state = 0;
-
-                            super.visitTypeInsn(
-                                    opcode,
-                                    type
-                            );
-                        }
-
-                        @Override
-                        public void visitJumpInsn(
-                                int opcode,
-                                org.objectweb.asm.Label label) {
-
-                            state = 0;
-
-                            super.visitJumpInsn(
-                                    opcode,
-                                    label
-                            );
-                        }
-
-                        @Override
-                        public void visitLdcInsn(Object value) {
-
-                            state = 0;
-
-                            super.visitLdcInsn(value);
-                        }
-
-                        @Override
-                        public void visitMethodInsn(
-                                int opcode,
-                                String owner,
-                                String name,
-                                String desc) {
-
-                            state = 0;
-
-                            super.visitMethodInsn(
-                                    opcode,
-                                    owner,
-                                    name,
-                                    desc
-                            );
+                            };
                         }
                     };
-                }
-            };
 
             reader.accept(visitor, 0);
 
@@ -281,7 +170,7 @@ public class StretchedScreenTransformer implements IClassTransformer {
             throwable.printStackTrace();
 
             /*
-             * Nunca deixa o transformer derrubar o Minecraft.
+             * Se algo der errado, mantém a classe original.
              */
             return basicClass;
         }
