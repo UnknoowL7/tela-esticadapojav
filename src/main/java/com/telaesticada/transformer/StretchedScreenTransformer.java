@@ -345,4 +345,4 @@ public class StretchedScreenTransformer implements IClassTransformer {
             return basicClass;
         }
     }
-                                }
+                        }
