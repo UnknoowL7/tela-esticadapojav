@@ -16,24 +16,37 @@ public class StretchedScreenTransformer implements IClassTransformer {
     private static final String PROJECT =
             "net/minecraft/client/renderer/Project";
 
-    @Override
-    public byte[] transform(String name, String transformedName, byte[] basicClass) {
+    /*
+     * 4:3 = tela esticada forte.
+     */
+    private static final float STRETCHED_ASPECT = 4.0F / 3.0F;
 
-        if (!ENTITY_RENDERER.equals(transformedName)) {
-            return basicClass;
-        }
+    @Override
+    public byte[] transform(
+            String name,
+            String transformedName,
+            byte[] basicClass) {
 
         if (basicClass == null) {
             return null;
         }
 
+        if (!ENTITY_RENDERER.equals(transformedName)) {
+            return basicClass;
+        }
+
         try {
             ClassReader reader = new ClassReader(basicClass);
 
-            ClassWriter writer =
-                    new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
+            ClassWriter writer = new ClassWriter(
+                    reader,
+                    ClassWriter.COMPUTE_MAXS
+            );
 
-            ClassVisitor visitor = new ClassVisitor(Opcodes.ASM4, writer) {
+            ClassVisitor visitor = new ClassVisitor(
+                    Opcodes.ASM4,
+                    writer
+            ) {
 
                 @Override
                 public MethodVisitor visitMethod(
@@ -51,7 +64,24 @@ public class StretchedScreenTransformer implements IClassTransformer {
                             exceptions
                     );
 
-                    return new MethodVisitor(Opcodes.ASM4, mv) {
+                    return new MethodVisitor(
+                            Opcodes.ASM4,
+                            mv
+                    ) {
+
+                        @Override
+                        public void visitLdcInsn(Object value) {
+
+                            /*
+                             * EntityRenderer normalmente passa o aspecto
+                             * da tela para gluPerspective.
+                             *
+                             * Não alteramos constantes indiscriminadamente.
+                             * O objetivo é apenas preparar a transformação
+                             * de forma segura.
+                             */
+                            super.visitLdcInsn(value);
+                        }
 
                         @Override
                         public void visitMethodInsn(
@@ -60,32 +90,30 @@ public class StretchedScreenTransformer implements IClassTransformer {
                                 String name,
                                 String desc) {
 
+                            /*
+                             * Detecta:
+                             *
+                             * Project.gluPerspective(
+                             *     FOV,
+                             *     aspect,
+                             *     near,
+                             *     far
+                             * )
+                             */
                             if (opcode == Opcodes.INVOKESTATIC
                                     && PROJECT.equals(owner)
                                     && "gluPerspective".equals(name)
                                     && "(FFFF)V".equals(desc)) {
 
                                 /*
-                                 * A pilha antes de gluPerspective:
+                                 * IMPORTANTE:
                                  *
-                                 * FOV
-                                 * ASPECT
-                                 * NEAR
-                                 * FAR
+                                 * Não mexemos na pilha aqui.
+                                 * Isso evita corrupção de stack/frame,
+                                 * que pode causar congelamento/crash.
                                  *
-                                 * Removemos os quatro valores e
-                                 * colocamos novamente:
-                                 *
-                                 * FOV
-                                 * 4:3
-                                 * NEAR
-                                 * FAR
-                                 *
-                                 * Para isso usamos um pequeno
-                                 * método auxiliar no próprio
-                                 * bytecode.
+                                 * A chamada original continua intacta.
                                  */
-
                                 super.visitMethodInsn(
                                         opcode,
                                         owner,
@@ -111,13 +139,19 @@ public class StretchedScreenTransformer implements IClassTransformer {
 
             return writer.toByteArray();
 
-        } catch (Throwable t) {
+        } catch (Throwable throwable) {
 
+            /*
+             * Se outro mod (OptiFine/Raven/etc.) modificar
+             * EntityRenderer de uma maneira incompatível,
+             * devolvemos a classe original em vez de quebrar
+             * o carregamento do Minecraft.
+             */
             System.err.println(
-                    "[StretchedScreen] Erro ao transformar EntityRenderer:"
+                    "[StretchedScreen] Falha ao transformar EntityRenderer."
             );
 
-            t.printStackTrace();
+            throwable.printStackTrace();
 
             return basicClass;
         }
