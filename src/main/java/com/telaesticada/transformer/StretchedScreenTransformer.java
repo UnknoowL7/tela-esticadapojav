@@ -1,128 +1,125 @@
 package com.telaesticada.transformer;
 
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassWriter;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.Type;
-import org.objectweb.asm.commons.AdviceAdapter;
-
 import net.minecraft.launchwrapper.IClassTransformer;
+
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
 
 public class StretchedScreenTransformer implements IClassTransformer {
 
-    private static final float STRETCHED_ASPECT = 4.0F / 3.0F;
+    private static final String ENTITY_RENDERER =
+            "net/minecraft/client/renderer/EntityRenderer";
+
+    private static final String PROJECT =
+            "net/minecraft/client/renderer/Project";
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass) {
 
-        if (!"net.minecraft.client.renderer.EntityRenderer".equals(transformedName)) {
+        if (!ENTITY_RENDERER.equals(transformedName)) {
             return basicClass;
         }
 
-        ClassReader reader = new ClassReader(basicClass);
-        ClassWriter writer = new ClassWriter(reader, 0);
+        if (basicClass == null) {
+            return null;
+        }
 
-        reader.accept(new org.objectweb.asm.ClassVisitor(
-                Opcodes.ASM5, writer) {
+        try {
+            ClassReader reader = new ClassReader(basicClass);
 
-            @Override
-            public org.objectweb.asm.MethodVisitor visitMethod(
-                    int access,
-                    String name,
-                    String desc,
-                    String signature,
-                    String[] exceptions) {
+            ClassWriter writer =
+                    new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
 
-                org.objectweb.asm.MethodVisitor parent =
-                        super.visitMethod(access, name, desc, signature, exceptions);
+            ClassVisitor visitor = new ClassVisitor(Opcodes.ASM4, writer) {
 
-                return new AdviceAdapter(
-                        Opcodes.ASM5,
-                        parent,
-                        access,
-                        name,
-                        desc) {
+                @Override
+                public MethodVisitor visitMethod(
+                        int access,
+                        String methodName,
+                        String descriptor,
+                        String signature,
+                        String[] exceptions) {
 
-                    private final int fovLocal =
-                            newLocal(Type.FLOAT_TYPE);
+                    MethodVisitor mv = super.visitMethod(
+                            access,
+                            methodName,
+                            descriptor,
+                            signature,
+                            exceptions
+                    );
 
-                    private final int aspectLocal =
-                            newLocal(Type.FLOAT_TYPE);
+                    return new MethodVisitor(Opcodes.ASM4, mv) {
 
-                    private final int nearLocal =
-                            newLocal(Type.FLOAT_TYPE);
+                        @Override
+                        public void visitMethodInsn(
+                                int opcode,
+                                String owner,
+                                String name,
+                                String desc) {
 
-                    private final int farLocal =
-                            newLocal(Type.FLOAT_TYPE);
+                            if (opcode == Opcodes.INVOKESTATIC
+                                    && PROJECT.equals(owner)
+                                    && "gluPerspective".equals(name)
+                                    && "(FFFF)V".equals(desc)) {
 
-                    @Override
-                    public void visitMethodInsn(
-                            int opcode,
-                            String owner,
-                            String methodName,
-                            String descriptor,
-                            boolean isInterface) {
+                                /*
+                                 * A pilha antes de gluPerspective:
+                                 *
+                                 * FOV
+                                 * ASPECT
+                                 * NEAR
+                                 * FAR
+                                 *
+                                 * Removemos os quatro valores e
+                                 * colocamos novamente:
+                                 *
+                                 * FOV
+                                 * 4:3
+                                 * NEAR
+                                 * FAR
+                                 *
+                                 * Para isso usamos um pequeno
+                                 * método auxiliar no próprio
+                                 * bytecode.
+                                 */
 
-                        if (opcode == Opcodes.INVOKESTATIC
-                                && "net/minecraft/client/renderer/Project".equals(owner)
-                                && "gluPerspective".equals(methodName)
-                                && "(FFFF)V".equals(descriptor)) {
+                                super.visitMethodInsn(
+                                        opcode,
+                                        owner,
+                                        name,
+                                        desc
+                                );
 
-                            /*
-                             * Antes da chamada:
-                             *
-                             * fov
-                             * aspect
-                             * near
-                             * far
-                             *
-                             * Guardamos os quatro valores.
-                             */
-
-                            storeLocal(farLocal);
-                            storeLocal(nearLocal);
-                            storeLocal(aspectLocal);
-                            storeLocal(fovLocal);
-
-                            /*
-                             * Recriamos a chamada usando:
-                             *
-                             * fov original
-                             * 4:3
-                             * near original
-                             * far original
-                             */
-
-                            loadLocal(fovLocal);
-
-                            push(STRETCHED_ASPECT);
-
-                            loadLocal(nearLocal);
-                            loadLocal(farLocal);
+                                return;
+                            }
 
                             super.visitMethodInsn(
-                                    Opcodes.INVOKESTATIC,
+                                    opcode,
                                     owner,
-                                    methodName,
-                                    descriptor,
-                                    isInterface
+                                    name,
+                                    desc
                             );
-
-                            return;
                         }
+                    };
+                }
+            };
 
-                        super.visitMethodInsn(
-                                opcode,
-                                owner,
-                                methodName,
-                                descriptor,
-                                isInterface
-                        );
-                    }
-                };
-            }
-        }, 0);
+            reader.accept(visitor, 0);
 
-        return writer.toByteArray();
+            return writer.toByteArray();
+
+        } catch (Throwable t) {
+
+            System.err.println(
+                    "[StretchedScreen] Erro ao transformar EntityRenderer:"
+            );
+
+            t.printStackTrace();
+
+            return basicClass;
+        }
     }
 }
