@@ -51,3 +51,13 @@ processResources {
         exclude 'mcmod.info'
     }
 }
+
+jar {
+    manifest {
+        attributes(
+            'FMLCorePlugin': 'com.telaesticada.core.StretchedCoreMod',
+            'FMLCorePluginContainsFMLMod': 'true',
+            'FMLCorePluginName': 'Stretched Screen Core'
+        )
+    }
+}
