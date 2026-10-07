@@ -1,7 +1,6 @@
 package com.telaesticada.core;
 
 import com.telaesticada.transformer.StretchedScreenTransformer;
-
 import net.minecraftforge.fml.relauncher.IFMLLoadingPlugin;
 
 import java.util.Map;
@@ -13,7 +12,7 @@ public class StretchedCoreMod implements IFMLLoadingPlugin {
     @Override
     public String[] getASMTransformerClass() {
         return new String[] {
-                StretchedScreenTransformer.class.getName()
+            StretchedScreenTransformer.class.getName()
         };
     }
 
