@@ -36,6 +36,7 @@ repositories {
 }
 
 dependencies {
+    compile 'org.ow2.asm:asm-commons:5.0.4'
 }
 
 processResources {
@@ -43,7 +44,6 @@ processResources {
 
     from(sourceSets.main.resources.srcDirs) {
         include 'mcmod.info'
-
         expand 'version': project.version
     }
 
