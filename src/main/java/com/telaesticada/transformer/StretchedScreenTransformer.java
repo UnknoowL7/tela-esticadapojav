@@ -13,13 +13,9 @@ public class StretchedScreenTransformer implements IClassTransformer {
     private static final String ENTITY_RENDERER =
             "net/minecraft/client/renderer/EntityRenderer";
 
-    /*
-     * Aspecto forçado para 4:3.
-     *
-     * Como a tela do Pojav é bem mais larga que 4:3,
-     * o Minecraft renderiza a visão 4:3 e ela ocupa
-     * toda a tela, produzindo o efeito stretched.
-     */
+    private static final String MINECRAFT =
+            "net/minecraft/client/Minecraft";
+
     private static final float STRETCHED_ASPECT = 4.0F / 3.0F;
 
     @Override
@@ -32,9 +28,6 @@ public class StretchedScreenTransformer implements IClassTransformer {
             return null;
         }
 
-        /*
-         * Só transforma EntityRenderer.
-         */
         if (!ENTITY_RENDERER.equals(transformedName)) {
             return basicClass;
         }
@@ -74,21 +67,7 @@ public class StretchedScreenTransformer implements IClassTransformer {
                             parent
                     ) {
 
-                        /*
-                         * Estado usado para detectar exatamente:
-                         *
-                         * Minecraft.displayWidth
-                         * I2F
-                         * Minecraft.displayHeight
-                         * I2F
-                         * FDIV
-                         *
-                         * Ou seja:
-                         *
-                         * (float)displayWidth /
-                         * (float)displayHeight
-                         */
-                        private int aspectState = 0;
+                        private int state = 0;
 
                         @Override
                         public void visitFieldInsn(
@@ -98,32 +77,12 @@ public class StretchedScreenTransformer implements IClassTransformer {
                                 String fieldDescriptor) {
 
                             if (opcode == Opcodes.GETFIELD
-                                    && "net/minecraft/client/Minecraft"
-                                    .equals(owner)) {
+                                    && MINECRAFT.equals(owner)) {
 
-                                /*
-                                 * MCP/deobfuscated
-                                 */
-                                if ("displayWidth".equals(fieldName)) {
+                                if ("displayWidth".equals(fieldName)
+                                        || "field_71443_c".equals(fieldName)) {
 
-                                    aspectState = 1;
-
-                                    super.visitFieldInsn(
-                                            opcode,
-                                            owner,
-                                            fieldName,
-                                            fieldDescriptor
-                                    );
-
-                                    return;
-                                }
-
-                                /*
-                                 * SRG/obfuscated Minecraft 1.8.9
-                                 */
-                                if ("field_71443_c".equals(fieldName)) {
-
-                                    aspectState = 1;
+                                    state = 1;
 
                                     super.visitFieldInsn(
                                             opcode,
@@ -137,9 +96,9 @@ public class StretchedScreenTransformer implements IClassTransformer {
 
                                 if (("displayHeight".equals(fieldName)
                                         || "field_71440_d".equals(fieldName))
-                                        && aspectState == 2) {
+                                        && state == 2) {
 
-                                    aspectState = 3;
+                                    state = 3;
 
                                     super.visitFieldInsn(
                                             opcode,
@@ -152,7 +111,7 @@ public class StretchedScreenTransformer implements IClassTransformer {
                                 }
                             }
 
-                            aspectState = 0;
+                            state = 0;
 
                             super.visitFieldInsn(
                                     opcode,
@@ -166,63 +125,61 @@ public class StretchedScreenTransformer implements IClassTransformer {
                         public void visitInsn(int opcode) {
 
                             /*
-                             * displayWidth -> I2F
+                             * displayWidth -> float
                              */
                             if (opcode == Opcodes.I2F
-                                    && aspectState == 1) {
+                                    && state == 1) {
 
-                                aspectState = 2;
+                                state = 2;
 
                                 super.visitInsn(opcode);
                                 return;
                             }
 
                             /*
-                             * displayHeight -> I2F
+                             * displayHeight -> float
                              */
                             if (opcode == Opcodes.I2F
-                                    && aspectState == 3) {
+                                    && state == 3) {
 
-                                aspectState = 4;
+                                state = 4;
 
                                 super.visitInsn(opcode);
                                 return;
                             }
 
                             /*
-                             * Aqui temos:
+                             * width / height
                              *
-                             * (float)displayWidth /
-                             * (float)displayHeight
-                             *
-                             * Na pilha:
-                             *
-                             * width height
-                             *
-                             * Removemos os dois valores e colocamos:
-                             *
-                             * 4.0F / 3.0F
+                             * Substitui o resultado por 4:3.
                              */
                             if (opcode == Opcodes.FDIV
-                                    && aspectState == 4) {
+                                    && state == 4) {
 
+                                /*
+                                 * Remove:
+                                 *
+                                 * width
+                                 * height
+                                 */
                                 super.visitInsn(Opcodes.POP);
                                 super.visitInsn(Opcodes.POP);
 
+                                /*
+                                 * Coloca:
+                                 *
+                                 * 4.0 / 3.0
+                                 */
                                 super.visitLdcInsn(
                                         STRETCHED_ASPECT
                                 );
 
-                                aspectState = 0;
+                                state = 0;
 
                                 return;
                             }
 
-                            /*
-                             * Qualquer outra instrução quebra
-                             * a sequência que estamos procurando.
-                             */
-                            aspectState = 0;
+                            state = 0;
 
                             super.visitInsn(opcode);
                         }
@@ -232,7 +189,7 @@ public class StretchedScreenTransformer implements IClassTransformer {
                                 int opcode,
                                 int var) {
 
-                            aspectState = 0;
+                            state = 0;
 
                             super.visitVarInsn(
                                     opcode,
@@ -245,7 +202,7 @@ public class StretchedScreenTransformer implements IClassTransformer {
                                 int opcode,
                                 int operand) {
 
-                            aspectState = 0;
+                            state = 0;
 
                             super.visitIntInsn(
                                     opcode,
@@ -258,7 +215,7 @@ public class StretchedScreenTransformer implements IClassTransformer {
                                 int opcode,
                                 String type) {
 
-                            aspectState = 0;
+                            state = 0;
 
                             super.visitTypeInsn(
                                     opcode,
@@ -271,7 +228,7 @@ public class StretchedScreenTransformer implements IClassTransformer {
                                 int opcode,
                                 org.objectweb.asm.Label label) {
 
-                            aspectState = 0;
+                            state = 0;
 
                             super.visitJumpInsn(
                                     opcode,
@@ -282,7 +239,7 @@ public class StretchedScreenTransformer implements IClassTransformer {
                         @Override
                         public void visitLdcInsn(Object value) {
 
-                            aspectState = 0;
+                            state = 0;
 
                             super.visitLdcInsn(value);
                         }
@@ -294,28 +251,13 @@ public class StretchedScreenTransformer implements IClassTransformer {
                                 String name,
                                 String desc) {
 
-                            aspectState = 0;
+                            state = 0;
 
                             super.visitMethodInsn(
                                     opcode,
                                     owner,
                                     name,
                                     desc
-                            );
-                        }
-
-                        @Override
-                        public void visitInsnAnnotation(
-                                int typeRef,
-                                org.objectweb.asm.TypePath typePath,
-                                String desc,
-                                boolean visible) {
-
-                            super.visitInsnAnnotation(
-                                    typeRef,
-                                    typePath,
-                                    desc,
-                                    visible
                             );
                         }
                     };
@@ -332,17 +274,16 @@ public class StretchedScreenTransformer implements IClassTransformer {
 
         } catch (Throwable throwable) {
 
-            /*
-             * Se houver incompatibilidade com outro mod,
-             * mantém o Minecraft funcionando normalmente.
-             */
             System.err.println(
                     "[StretchedScreen] Erro ao transformar EntityRenderer:"
             );
 
             throwable.printStackTrace();
 
+            /*
+             * Nunca deixa o transformer derrubar o Minecraft.
+             */
             return basicClass;
         }
     }
-                        }
+}
