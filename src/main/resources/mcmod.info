@@ -1,0 +1,16 @@
+[
+  {
+    "modid": "stretchedscreen",
+    "name": "Stretched Screen",
+    "description": "Stretched screen mod for Minecraft 1.8.9.",
+    "version": "${version}",
+    "mcversion": "1.8.9",
+    "url": "",
+    "updateUrl": "",
+    "authorList": ["UnknownL7"],
+    "credits": "",
+    "logoFile": "",
+    "screenshots": [],
+    "dependencies": []
+  }
+]
